@@ -21,10 +21,16 @@ def main():
     # create_descriptive_statistics_grafs(original_df)
 
     # MLE
-    mle_results = calculate_mle(original_df)
+    # mle_results = calculate_mle(original_df)
 
     # Inferencia Bayesiana
-    calculate_bayesian_inference(original_df, mle_results)
+    # calculate_bayesian_inference(original_df, mle_results)
+
+    # LRT Gamma-Gamma Test
+    lrt_gamma_test(original_df)
+
+    # LRT Normal-Normal Test
+    lrt_normal_test(original_df)
 
 
 def calc_descriptive_statistics(original_df):
@@ -141,17 +147,17 @@ def gamma_mle(data: np.ndarray):
 
 
 def normal_mle(data: np.ndarray):
-    meu_mle = normal_mu_mle(data)
-    var_mle = normal_var_mle(data, meu_mle)
+    mu_mle = normal_mu_mle(data)
+    var_mle = normal_var_mle(data, mu_mle)
 
-    print(f"NORMAL MLE u^={meu_mle} o2^={var_mle}")
-    return meu_mle, var_mle
+    print(f"NORMAL MLE u^={mu_mle} o2^={var_mle}")
+    return mu_mle, var_mle
 
 def normal_mu_mle(data: np.ndarray):
     return np.mean(data)
 
-def normal_var_mle(data, meu_mle: np.ndarray):
-    return np.mean((data - meu_mle) ** 2)
+def normal_var_mle(data, mu_mle: np.ndarray):
+    return np.mean((data - mu_mle) ** 2)
 
 def binomial_mle(data: np.ndarray):
     p_hat = np.mean((data / 100) * FIXED_BINOMIAL_Nt)
@@ -184,7 +190,7 @@ def plot_mle_gamma(data, client, var, params):
 
 
 def plot_mle_normal(data, client, var, params):
-    meu_mle = params[0]
+    mu_mle = params[0]
     std_mle = np.sqrt(params[1])
 
     # Histograma
@@ -192,7 +198,7 @@ def plot_mle_normal(data, client, var, params):
 
     # Função densidade do modelo
     x = np.linspace(min(data), max(data), 100)
-    plt.plot(x, stats.norm.pdf(x, loc=meu_mle, scale=std_mle), 'r-', lw=2, label='Normal MLE')
+    plt.plot(x, stats.norm.pdf(x, loc=mu_mle, scale=std_mle), 'r-', lw=2, label='Normal MLE')
     plt.xlabel('data')
     plt.ylabel('Densidade')
     plt.title(f'Histograma + PDF ajustada ({var}, {client})')
@@ -201,7 +207,7 @@ def plot_mle_normal(data, client, var, params):
     plt.close()
 
     # 2️⃣ QQ plot
-    stats.probplot(data, dist=stats.norm, sparams=(meu_mle, std_mle), plot=plt)
+    stats.probplot(data, dist=stats.norm, sparams=(mu_mle, std_mle), plot=plt)
     plt.title(f'QQ Plot dos data vs Normal ajustada ({var}, {client})')
     plt.savefig(f"figuras/MLE_qqplot_mle_normal_{var}_{client}.png", dpi=300)
     plt.close()
@@ -330,6 +336,105 @@ def posterior_gamma_prediction(post_params, like_params, data):
     if post_a > 2:
         pred_var = k * (k * post_a - 1) * (post_b ** 2) / (((post_a - 1) ** 2) * (post_a - 2))
     return pred_mean, pred_var
+
+def lrt_gamma_test(original_df, client_A = "client01", client_B = "client10", alpha=0.05):
+    variaveis = [
+        "download_throughput_bps",
+        "upload_throughput_bps",
+    ]
+    for var in variaveis:
+        print(f"TEST LRT GAMMA-GAMMA: {var}")
+        data_A = original_df[original_df["client"] == client_A][var].to_numpy()
+        data_B = original_df[original_df["client"] == client_B][var].to_numpy()
+        na = len(data_A)
+        nb = len(data_B)
+        Y_A = np.mean(data_A)
+        Y_B = np.mean(data_B)
+        data_concat = np.concatenate([data_A, data_B])
+        n = na + nb
+        Y = np.mean(data_concat)
+
+        # 2. Estimar k (shape) usando todos os dados (sob H0)
+        # scipy.stats.gamma.fit retorna (shape, loc, scale)
+        k_est, _, _ = stats.gamma.fit(data_concat, floc=0) 
+        
+        # 3. Calcular a estatística de teste Wobs
+        term_a = na * np.log(Y / Y_A)
+        term_b = nb * np.log(Y / Y_B)
+        w_obs = 2 * k_est * (term_a + term_b)
+        
+        # 4. Obter o valor crítico da Qui-quadrado com 1 grau de liberdade
+        # df = dim(H1) - dim(H0) = 2 - 1 = 1
+        critical_value = stats.chi2.ppf(1 - alpha, df=1)
+        p_value = stats.chi2.sf(w_obs, df=1)
+        
+        # 5. Resultados
+        print(f"--- Resultados do Teste LRT (Gamma) ---")
+        print(f"Média A: {Y_A:.4f} (n={na})")
+        print(f"Média B: {Y_B:.4f} (n={nb})")
+        print(f"Média Global: {Y:.4f} (n={n})")
+        print(f"Parâmetro k estimado: {k_est:.4f}")
+        print(f"Wobs (Estatística): {w_obs:.4f}")
+        print(f"Valor Crítico (alpha={alpha}): {critical_value:.4f}")
+        print(f"p-valor: {p_value:.4e}")
+        
+        if w_obs > critical_value:
+            print("\nDecisão: REJEITAR H0. Há evidência de que as taxas são diferentes.")
+        else:
+            print("\nDecisão: NÃO REJEITAR H0. Não há evidência de diferença significativa.")
+
+def lrt_normal_test(original_df, client_A = "client01", client_B = "client10", alpha=0.05):
+    variaveis = [
+        "rtt_download_sec",
+        "rtt_upload_sec",
+    ]
+    for var in variaveis:
+        print(f"TEST LRT NORMAL-NORMAL: {var}")
+        data_A = original_df[original_df["client"] == client_A][var].to_numpy()
+        data_B = original_df[original_df["client"] == client_B][var].to_numpy()
+        na = len(data_A)
+        nb = len(data_B)
+
+        data_concat = np.concatenate([data_A, data_B])
+        n = na + nb
+        Y = np.mean(data_concat)
+
+        
+        # 2. Calcular médias amostrais
+        Y_A = np.mean(data_A)
+        Y_B = np.mean(data_B)
+        
+        # 3. Estimar a variância (sigma^2) global (MLE)
+        var_a = np.var(data_A)
+        var_b = np.var(data_B)
+        sigma_2 = (na * var_a + nb * var_b) / (na + nb) # Variância combinada (MLE Global)
+        
+        # 4. Computar a estatística Wobs
+        # Fórmula: (1/sigma^2) * (na*nb / (na+nb)) * (Y_A - Y_B)^2
+        factor = (na * nb) / (na + nb)
+        w_obs = (1 / sigma_2) * factor * (Y_A - Y_B)**2
+        
+        # 5. Obter o quantil crítico da Qui-quadrado com 1 grau de liberdade
+        # df = 1 porque a diferença de parâmetros entre H1 (muA, muB) e H0 (mu) é 1
+        critical_value = stats.chi2.ppf(1 - alpha, df=1)
+        
+        # 6. Calcular o p-valor (usando survival function para maior precisão)
+        p_value = stats.chi2.sf(w_obs, df=1)
+        
+        # Resultados
+        print(f"--- Resultados do Teste LRT (Normal) ---")
+        print(f"Média A: {Y_A:.4f} (n={na})")
+        print(f"Média B: {Y_B:.4f} (n={nb})")
+        print(f"Média Global: {Y:.4f} (n={n})")
+        print(f"Variância (sigma^2) estimada: {sigma_2:.4f}")
+        print(f"Wobs (Estatística): {w_obs:.4f}")
+        print(f"Valor Crítico (alpha={alpha}): {critical_value:.4f}")
+        print(f"p-valor: {p_value:.4e}")
+        
+        if w_obs > critical_value:
+            print("\nDecisão: REJEITAR H0. As médias são significativamente diferentes.")
+        else:
+            print("\nDecisão: NÃO REJEITAR H0. Não há evidência de diferença nas médias.")
 
 
 main()
